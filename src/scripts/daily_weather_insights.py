@@ -289,20 +289,50 @@ def get_all_user_fcm_tokens(db):
     list: List of FCM tokens or empty list if none found
     """
     try:
-        # Get the users collection - adjust the collection path as needed for your database structure
+        tokens = []
+        
+        # METHOD 1: Get tokens from dedicated tokens collection (primary source)
+        print("Checking fcm_tokens collection...")
+        try:
+            tokens_ref = db.collection('fcm_tokens')
+            token_query = tokens_ref.where('isValid', '==', True).stream()
+            
+            token_count = 0
+            for token_doc in token_query:
+                token_data = token_doc.to_dict()
+                if 'token' in token_data and len(token_data['token']) > 20:
+                    tokens.append(token_data['token'])
+                    token_count += 1
+            
+            print(f"Found {token_count} FCM tokens in fcm_tokens collection")
+        except Exception as e:
+            print(f"Error querying fcm_tokens collection: {e}")
+        
+        # METHOD 2: Get tokens from user documents (backup method)
+        print("Checking users collection for tokens...")
         users_ref = db.collection('users')
         user_docs = users_ref.stream()
         
-        # Extract FCM tokens from user documents
-        tokens = []
+        user_token_count = 0
         for user_doc in user_docs:
             user_data = user_doc.to_dict()
             # Check for FCM token in different possible fields
-            token = user_data.get('fcmToken') or user_data.get('fcm_token') or user_data.get('messagingToken')
-            if token and isinstance(token, str) and len(token) > 20:  # Basic validation for token format
+            token = None
+            for field_name in ['fcmToken', 'fcm_token', 'messagingToken', 'messageToken']:
+                if field_name in user_data and user_data[field_name]:
+                    token = user_data[field_name]
+                    break
+                    
+            # Make sure token is valid and not already added
+            if token and isinstance(token, str) and len(token) > 20 and token not in tokens:
                 tokens.append(token)
+                user_token_count += 1
         
-        print(f"Found {len(tokens)} FCM tokens for notification")
+        print(f"Found {user_token_count} additional FCM tokens in users collection")
+        
+        # Log summary
+        print(f"Found total of {len(tokens)} unique FCM tokens for notification")
+        
         return tokens
     except Exception as e:
         print(f"Error retrieving user FCM tokens: {e}")
